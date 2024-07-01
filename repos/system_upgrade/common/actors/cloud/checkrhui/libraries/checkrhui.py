@@ -5,6 +5,7 @@ from collections import namedtuple
 from leapp import reporting
 from leapp.exceptions import StopActorExecutionError
 from leapp.libraries.common import rhsm, rhui
+from leapp.libraries.common.gpg import get_path_to_gpg_certs
 from leapp.libraries.common.config import version
 from leapp.libraries.stdlib import api
 from leapp.models import (
@@ -152,6 +153,17 @@ def customize_rhui_setup_for_aws(rhui_family, setup_info):
                                        dst='/usr/lib/python3.6/site-packages/dnf-plugins/')
     setup_info.postinstall_tasks.files_to_copy.append(amazon_plugin_copy_task)
 
+def customize_rhui_setup_for_alibaba(rhui_family, setup_info):
+    if not rhui_family.provider == rhui.RHUIProvider.ALIBABA:
+        return
+    target_version = version.get_target_major_version()
+    if target_version != '8':
+        return
+    apath = get_path_to_gpg_certs()
+    src_path = os.path.join(apath, 'RPM-GPG-KEY-rhui-client-all-alibaba-new')
+    alibaba_copy_task = CopyFile(src=src_path,
+                                       dst='/etc/pki/rpm-gpg/RPM-GPG-KEY-rhui-client-all-alibaba-new')
+    setup_info.preinstall_tasks.files_to_copy_into_overlay.append(alibaba_copy_task)
 
 def produce_rhui_info_to_setup_target(rhui_family, source_setup_desc, target_setup_desc):
     rhui_files_location = os.path.join(api.get_common_folder_path('rhui'), rhui_family.client_files_folder)
@@ -185,6 +197,7 @@ def produce_rhui_info_to_setup_target(rhui_family, source_setup_desc, target_set
 
     customize_rhui_setup_for_gcp(rhui_family, target_client_setup_info)
     customize_rhui_setup_for_aws(rhui_family, target_client_setup_info)
+    customize_rhui_setup_for_alibaba(rhui_family, target_client_setup_info)
 
     rhui_info = RHUIInfo(
         provider=rhui_family.provider.lower(),
