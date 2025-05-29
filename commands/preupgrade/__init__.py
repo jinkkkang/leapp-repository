@@ -14,6 +14,10 @@ from leapp.utils.output import beautify_actor_exception, report_errors, report_i
 
 @command('preupgrade', help='Generate preupgrade report')
 @command_opt('whitelist-experimental', action='append', metavar='ActorName', help='Enables experimental actors')
+@command_opt('enable-experimental-feature', action='append', metavar='Feature',
+             help=('Enable experimental feature. '
+                   'Available experimental features: {}').format(util.get_help_str_with_avail_experimental_features()),
+             choices=list(util.EXPERIMENTAL_FEATURES), default=[])
 @command_opt('debug', is_flag=True, help='Enable debug mode', inherit=False)
 @command_opt('verbose', is_flag=True, help='Enable verbose logging', inherit=False)
 @command_opt('no-rhsm', is_flag=True, help='Use only custom repositories and skip actions'
@@ -28,8 +32,7 @@ from leapp.utils.output import beautify_actor_exception, report_errors, report_i
              choices=['ga', 'e4s', 'eus', 'aus'],
              value_type=str.lower)  # This allows the choices to be case insensitive
 @command_opt('iso', help='Use provided target RHEL installation image to perform the in-place upgrade.')
-@command_opt('target', choices=command_utils.get_supported_target_versions(),
-             help='Specify RHEL version to upgrade to for {} detected upgrade flavour'.format(
+@command_opt('target', help='Specify RHEL version to upgrade to for {} detected upgrade flavour'.format(
                  command_utils.get_upgrade_flavour()))
 @command_opt('report-schema', help='Specify report schema version for leapp-report.json',
              choices=['1.0.0', '1.1.0', '1.2.0'], default=get_config().get('report', 'schema'))
@@ -59,7 +62,12 @@ def preupgrade(args, breadcrumbs):
     except LeappError as exc:
         raise CommandError(exc.message)
 
+    command_utils.set_resource_limits()
+
     workflow = repositories.lookup_workflow('IPUWorkflow')()
+
+    command_utils.load_actor_configs_and_store_it_in_db(context, repositories, cfg)
+
     util.warn_if_unsupported(configuration)
     util.process_whitelist_experimental(repositories, workflow, configuration, logger)
     with beautify_actor_exception():

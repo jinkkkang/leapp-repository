@@ -16,7 +16,7 @@ jobs:
   reusable_workflow_copr_build_job:
     # This job only runs for '/rerun' pull request comments by owner, member, or collaborator of the repo/organization.
     name: Build copr builds for tft tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       artifacts: ${{ steps.gen_artifacts.outputs.artifacts }}
     if: |
@@ -56,7 +56,7 @@ jobs:
         id: copr_build
         env:
           COPR_CONFIG: "copr_fedora.conf"
-          COPR_CHROOT: "epel-7-x86_64,epel-8-x86_64"
+          COPR_CHROOT: "epel-8-x86_64"
           COPR_REPO: "@oamg/leapp"
         run: |
           cat << EOF > $COPR_CONFIG
@@ -122,7 +122,7 @@ jobs:
         if: ${{ steps.leapp_pr_regex_match.outputs.match != '' }}
         env:
           COPR_CONFIG: "copr_fedora.conf"
-          COPR_CHROOT: "epel-7-x86_64,epel-8-x86_64"
+          COPR_CHROOT: "epel-8-x86_64"
           COPR_REPO: "@oamg/leapp"
         run: |
           cat << EOF > $COPR_CONFIG

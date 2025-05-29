@@ -51,7 +51,7 @@ py2_byte_compile "%1" "%2"}
 # RHEL 8+ packages to be consistent with other leapp projects in future.
 
 Name:           leapp-repository
-Version:        0.20.0
+Version:        0.22.0
 Release:        1%{?dist}
 Summary:        Repositories for leapp
 
@@ -120,7 +120,7 @@ Requires:       leapp-repository-dependencies = %{leapp_repo_deps}
 
 # IMPORTANT: this is capability provided by the leapp framework rpm.
 # Check that 'version' instead of the real framework rpm version.
-Requires:       leapp-framework >= 5.0, leapp-framework < 6
+Requires:       leapp-framework >= 6.1, leapp-framework < 7
 
 # Since we provide sub-commands for the leapp utility, we expect the leapp
 # tool to be installed as well.
@@ -212,6 +212,12 @@ Requires:   NetworkManager-libnm
 Requires:   python3-gobject-base
 
 %endif
+
+%if 0%{?rhel} && 0%{?rhel} == 9
+############# RHEL 9 dependencies (when the source system is RHEL 9) ##########
+# Required to convert pam_userdb database from BerkeleyDB to GDBM
+Requires:   libdb-utils
+%endif
 ##################################################
 # end requirement
 ##################################################
@@ -244,6 +250,9 @@ install -m 0755 -d %{buildroot}%{_sysconfdir}/leapp/files/
 install -m 0644 etc/leapp/transaction/* %{buildroot}%{_sysconfdir}/leapp/transaction
 install -m 0644 etc/leapp/files/* %{buildroot}%{_sysconfdir}/leapp/files
 
+# uncomment to install existing configs if any exists
+#install -m 0644 etc/leapp/actor_conf.d/* %%{buildroot}%%{_sysconfdir}/leapp/actor_conf.d
+
 # install CLI commands for the leapp utility on the expected path
 install -m 0755 -d %{buildroot}%{leapp_python_sitelib}/leapp/cli/
 cp -r commands %{buildroot}%{leapp_python_sitelib}/leapp/cli/
@@ -261,6 +270,9 @@ rm -rf %{buildroot}%{repositorydir}/common/actors/testactor
 find %{buildroot}%{repositorydir}/common -name "test.py" -delete
 rm -rf `find %{buildroot}%{repositorydir} -name "tests" -type d`
 find %{buildroot}%{repositorydir} -name "Makefile" -delete
+# .gitkeep file is used to have a directory in the repo. but we do not want these
+# files in the resulting RPM
+find %{buildroot} -name .gitkeep -delete
 
 for DIRECTORY in $(find  %{buildroot}%{repositorydir}/  -mindepth 1 -maxdepth 1 -type d);
 do
@@ -289,6 +301,8 @@ done;
 %dir %{custom_repositorydir}
 %dir %{leapp_python_sitelib}/leapp/cli/commands
 %config %{_sysconfdir}/leapp/files/*
+# uncomment to package installed configs
+#%%config %%{_sysconfdir}/leapp/actor_conf.d/*
 %{_sysconfdir}/leapp/repos.d/*
 %{_sysconfdir}/leapp/transaction/*
 %{repositorydir}/*

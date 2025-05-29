@@ -16,6 +16,24 @@ from leapp.utils.audit import get_checkpoints, get_connection, get_messages
 from leapp.utils.output import report_unsupported
 from leapp.utils.report import fetch_upgrade_report_messages, generate_report_file
 
+EXPERIMENTAL_FEATURES = {
+    'livemode': [
+        'live_image_generator',
+        'live_mode_config_scanner',
+        'live_mode_reporter',
+        'prepare_live_image',
+        'emit_livemode_requirements',
+        'remove_live_image',
+    ]
+}
+""" Maps experimental features to a set of experimental actors that need to be enabled. """
+
+
+def get_help_str_with_avail_experimental_features():
+    if EXPERIMENTAL_FEATURES:
+        return ', '.join(EXPERIMENTAL_FEATURES)
+    return 'There are no experimental features available'
+
 
 def disable_database_sync():
     def disable_db_sync_decorator(f):
@@ -184,11 +202,25 @@ def handle_output_level(args):
 # the latest supported release because of target_version discovery attempt.
 def prepare_configuration(args):
     """Returns a configuration dict object while setting a few env vars as a side-effect"""
+
     if args.whitelist_experimental:
         args.whitelist_experimental = list(itertools.chain(*[i.split(',') for i in args.whitelist_experimental]))
         os.environ['LEAPP_EXPERIMENTAL'] = '1'
     else:
         os.environ['LEAPP_EXPERIMENTAL'] = '0'
+        args.whitelist_experimental = []
+
+    for experimental_feature in set(args.enable_experimental_feature):
+        # It might happen that there are no experimental features, which would allow user
+        # to pass us any string as an experimental feature.
+        if experimental_feature not in EXPERIMENTAL_FEATURES:
+            continue
+
+        actors_needed_for_feature = EXPERIMENTAL_FEATURES[experimental_feature]
+        args.whitelist_experimental.extend(actors_needed_for_feature)
+    if args.enable_experimental_feature:
+        os.environ['LEAPP_EXPERIMENTAL'] = '1'
+
     os.environ['LEAPP_UNSUPPORTED'] = '0' if os.getenv('LEAPP_UNSUPPORTED', '0') == '0' else '1'
     if args.no_rhsm:
         os.environ['LEAPP_NO_RHSM'] = '1'
@@ -228,14 +260,14 @@ def prepare_configuration(args):
 
     current_version = command_utils.get_os_release_version_id('/etc/os-release')
     os.environ['LEAPP_IPU_IN_PROGRESS'] = '{source}to{target}'.format(
-        source=command_utils.get_major_version(current_version),
-        target=command_utils.get_major_version(target_version)
+        source=command_utils.get_major_version_from_a_valid_version(current_version),
+        target=command_utils.get_major_version_from_a_valid_version(target_version)
     )
 
     configuration = {
         'debug': os.getenv('LEAPP_DEBUG', '0'),
         'verbose': os.getenv('LEAPP_VERBOSE', '0'),
-        'whitelist_experimental': args.whitelist_experimental or (),
+        'whitelist_experimental': args.whitelist_experimental or (),  # Modified to also contain exp. features
         'environment': {env: os.getenv(env) for env in os.environ if env.startswith('LEAPP_')},
         'cmd': sys.argv,
     }

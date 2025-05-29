@@ -1,3 +1,4 @@
+import itertools
 import re
 
 from leapp import reporting
@@ -5,7 +6,12 @@ from leapp.exceptions import StopActorExecutionError
 from leapp.libraries import stdlib
 from leapp.libraries.common.config import architecture, version
 from leapp.libraries.stdlib import api
-from leapp.models import InstalledTargetKernelInfo, KernelCmdlineArg, TargetKernelCmdlineArgTasks
+from leapp.models import (
+    InstalledTargetKernelInfo,
+    KernelCmdlineArg,
+    LateTargetKernelCmdlineArgTasks,
+    TargetKernelCmdlineArgTasks
+)
 
 KERNEL_CMDLINE_FILE = "/etc/kernel/cmdline"
 
@@ -71,7 +77,9 @@ def retrieve_arguments_to_modify():
     kernelargs_msgs_to_add = list(api.consume(KernelCmdlineArg))
     kernelargs_msgs_to_remove = []
 
-    for target_kernel_arg_task in api.consume(TargetKernelCmdlineArgTasks):
+    modification_msgs = itertools.chain(api.consume(TargetKernelCmdlineArgTasks),
+                                        api.consume(LateTargetKernelCmdlineArgTasks))
+    for target_kernel_arg_task in modification_msgs:
         kernelargs_msgs_to_add.extend(target_kernel_arg_task.to_add)
         kernelargs_msgs_to_remove.extend(target_kernel_arg_task.to_remove)
 
@@ -109,10 +117,55 @@ def _extract_grubby_value(record):
     return matches.group(2)
 
 
+def report_multple_entries_for_default_kernel():
+    if use_cmdline_file():
+        report_hint = (
+            'After the system has been rebooted into the new version of RHEL,'
+            ' check that configured default kernel cmdline arguments in /etc/kernel/cmdline '
+            ' are correct. In case that different arguments are expected, update the file as needed.'
+        )
+    else:
+        report_hint = (
+            'After the system has been rebooted into the new version of RHEL,'
+            ' check that configured default kernel cmdline arguments are set as expected, using'
+            ' the `grub2-editenv list` command. '
+            ' If different default arguments are expected, update them using grub2-editenv.\n'
+            ' For example, consider that current booted kernel has correct kernel cmdline'
+            ' arguments and /proc/cmdline contains:\n\n'
+            '    BOOT_IMAGE=(hd0,msdos1)/vmlinuz-4.18.0-425.3.1.el8.x86_64'
+            ' root=/dev/mapper/rhel_ibm--root ro console=tty0'
+            ' console=ttyS0,115200 rd_NO_PLYMOUTH\n\n'
+            ' then run the following grub2-editenv command:\n\n'
+            '    # grub2-editenv - set "kernelopts=root=/dev/mapper/rhel_ibm--root'
+            ' ro console=tty0 console=ttyS0,115200 rd_NO_PLYMOUTH"'
+        )
+
+    reporting.create_report([
+        reporting.Title('Ensure that expected default kernel cmdline arguments are set'),
+        reporting.Summary(
+            'During the upgrade we needed to modify the kernel command line arguments.'
+            ' However, multiple bootloader entries with different arguments were found for the default'
+            ' kernel (perhaps MAKEDEBUG=yes is set in /etc/sysconfig/kernel).'
+            ' Leapp used the arguments from the first found entry of the target kernel'
+            ' and set it as the new default kernel cmdline arguments for kernels installed in the future.'
+        ),
+        reporting.Remediation(hint=report_hint),
+        reporting.Severity(reporting.Severity.HIGH),
+        reporting.Groups([
+            reporting.Groups.BOOT,
+            reporting.Groups.KERNEL,
+            reporting.Groups.POST,
+        ]),
+        reporting.RelatedResource('file', '/etc/kernel/cmdline'),
+    ])
+
+
 def retrieve_args_for_default_kernel(kernel_info):
     # Copy the args for the default kernel to all kernels.
     kernel_args = None
     kernel_root = None
+    detected_multiple_entries = False
+
     cmd = ['grubby', '--info', kernel_info.kernel_img_path]
     output = stdlib.run(cmd, split=False)
     for record in output['stdout'].splitlines():
@@ -122,25 +175,39 @@ def retrieve_args_for_default_kernel(kernel_info):
             temp_kernel_args = _extract_grubby_value(record)
 
             if kernel_args:
-                api.current_logger().warning('Grubby output is malformed:'
-                                             ' `args=` is listed more than once.')
                 if kernel_args != temp_kernel_args:
-                    raise ReadOfKernelArgsError('Grubby listed `args=` multiple'
-                                                ' times with different values.')
-            kernel_args = _extract_grubby_value(record)
+                    api.current_logger().warning(
+                        'Grubby output listed `args=` multiple times with different values,'
+                        ' continuing with the first result'
+                    )
+                    detected_multiple_entries = True
+                else:
+                    api.current_logger().warning('Grubby output listed `args=` more than once')
+            else:
+                kernel_args = temp_kernel_args
         elif record.startswith('root='):
-            api.current_logger().warning('Grubby output is malformed:'
-                                         ' `root=` is listed more than once.')
+            temp_kernel_root = _extract_grubby_value(record)
+
             if kernel_root:
-                raise ReadOfKernelArgsError('Grubby listed `root=` multiple'
-                                            ' times with different values')
-            kernel_root = _extract_grubby_value(record)
+                if kernel_root != temp_kernel_root:
+                    api.current_logger().warning(
+                        'Grubby output listed `root=` multiple times with different values,'
+                        ' continuing with the first result'
+                    )
+                    detected_multiple_entries = True
+                else:
+                    api.current_logger().warning('Grubby output listed `root=` more than once')
+            else:
+                kernel_root = temp_kernel_root
 
     if not kernel_args or not kernel_root:
         raise ReadOfKernelArgsError(
             'Failed to retrieve kernel command line to save for future installed'
             ' kernels: root={}, args={}'.format(kernel_root, kernel_args)
         )
+
+    if detected_multiple_entries:
+        report_multple_entries_for_default_kernel()
 
     return kernel_root, kernel_args
 
@@ -175,14 +242,14 @@ def entrypoint(configs=None):
         api.current_logger().error(str(e))
 
         if use_cmdline_file():
-            report_hint = reporting.Hints(
+            report_hint = (
                 'After the system has been rebooted into the new version of RHEL, you'
                 ' should take the kernel cmdline arguments from /proc/cmdline (Everything'
                 ' except the BOOT_IMAGE entry and initrd entries) and copy them into'
                 ' /etc/kernel/cmdline before installing any new kernels.'
             )
         else:
-            report_hint = reporting.Hints(
+            report_hint = (
                 'After the system has been rebooted into the new version of RHEL, you'
                 ' should take the kernel cmdline arguments from /proc/cmdline (Everything'
                 ' except the BOOT_IMAGE entry and initrd entries) and then use the'
@@ -204,7 +271,7 @@ def entrypoint(configs=None):
                 ' not able to set the arguments as the default for kernels installed in'
                 ' the future.'
             ),
-            report_hint,
+            reporting.Remediation(hint=report_hint),
             reporting.Severity(reporting.Severity.HIGH),
             reporting.Groups([
                 reporting.Groups.BOOT,

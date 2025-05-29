@@ -5,7 +5,7 @@ import shutil
 from collections import namedtuple
 
 from leapp.libraries.common.config import get_all_envs
-from leapp.libraries.common.config.version import get_source_major_version
+from leapp.libraries.common.config.version import get_source_major_version, matches_source_version
 from leapp.libraries.stdlib import api, CalledProcessError, run
 
 # Using ALWAYS_BIND will crash the upgrade process if the file does not exist.
@@ -34,6 +34,7 @@ class MountingMode(object):
 
 def _makedirs(path, mode=0o777, exists_ok=True):
     """ Helper function which extends os.makedirs with exists_ok on all versions of python. """
+    api.current_logger().debug('Making dir:%s with mode:%o', path, mode)
     try:
         os.makedirs(path, mode=mode)
     except OSError:
@@ -87,6 +88,9 @@ class IsolationType(object):
                 # in such a case, just add line into the previous solution..
                 # TODO: the same about --capability=all
                 final_cmd += ['--keep-unit', '--capability=all']
+            if matches_source_version('>= 9.0'):
+                # Disable pseudo-TTY in container
+                final_cmd += ['--pipe']
             return final_cmd + ['-D', self.target] + binds + setenvs + cmd
 
     class CHROOT(_Implementation):
