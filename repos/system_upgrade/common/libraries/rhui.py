@@ -595,12 +595,14 @@ RHUI_CLOUD_MAP = {
     }
 }
 
-# TODO(mmatuska) deprecate or adjust for 9to10?
+
 def get_upg_path():
     """
     Get upgrade path in specific string format
     """
-    return '7to8' if get_target_major_version() == '8' else '8to9'
+    source_major_version = get_source_major_version()
+    target_major_version = get_target_major_version()
+    return '{0}to{1}'.format(source_major_version, target_major_version())
 
 
 @deprecated(since='2023-07-27', message='This functionality has been replaced with the RHUIInfo message.')
